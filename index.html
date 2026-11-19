@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- ✏️ SWAP: the title shown in the browser tab -->
+  <title>Colonial Territories Map</title>
+
+  <!-- Leaflet: free, open-source map library. No account or API key needed. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------
+       COLOURS — change these to restyle the whole page.
+       ------------------------------------------------------------ */
+    :root {
+      --card-bg: rgba(255, 252, 245, 0.95);  /* text box background (0.95 = almost solid) */
+      --card-text: #1f1b16;                  /* text colour inside the boxes */
+      --card-muted: #6b6257;                 /* small grey notes */
+      --accent: #a23b2a;                     /* headings, highlighted territory */
+      --context-line: #8a7f72;               /* thin lines for all other historical borders */
+      --page-bg: #e9e4da;                    /* shows briefly while map tiles load */
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --card-bg: rgba(28, 25, 22, 0.94);
+        --card-text: #f1ece4;
+        --card-muted: #b3a999;
+        --accent: #e0826f;
+        --context-line: #9c9184;
+        --page-bg: #1c1916;
+      }
+    }
+
+    html, body { margin: 0; padding: 0; background: var(--page-bg); }
+    body { font-family: Georgia, "Times New Roman", serif; color: var(--card-text); }
+
+    /* The map stays fixed in the background while the text scrolls over it. */
+    #map { position: fixed; inset: 0; z-index: 0; }
+
+    /* Fade the modern basemap so the historical outlines stand out
+       and modern labels are less prominent. 0 = invisible, 1 = full strength. */
+    .basemap { filter: grayscale(1) sepia(0.25); opacity: 0.55; }
+
+    /* "Open full screen" bar — only appears when the page is embedded in Google Sites. */
+    #topbar {
+      position: fixed; top: 10px; right: 10px; z-index: 1000; display: none;
+      font: 14px/1.2 system-ui, sans-serif;
+    }
+    #topbar a {
+      display: inline-block; padding: 8px 12px; border-radius: 6px;
+      background: var(--card-bg); color: var(--card-text); text-decoration: none;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    }
+
+    /* The column of text "stops" that scroll past the map. */
+    #story { position: relative; z-index: 1; pointer-events: none; }
+    .step {
+      min-height: 100vh;              /* each stop takes one screen of scrolling */
+      display: flex; align-items: center;
+      padding: 0 16px; box-sizing: border-box;
+    }
+    .card {
+      pointer-events: auto;
+      width: 100%; max-width: 380px;
+      margin-left: 3vw;
+      background: var(--card-bg);
+      padding: 20px 22px; border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.25);
+      line-height: 1.55; font-size: 17px;
+      opacity: 0.35; transition: opacity .4s;
+    }
+    .step.is-active .card { opacity: 1; }
+    .card h2 { margin: 0 0 4px; font-size: 22px; color: var(--accent); line-height: 1.25; }
+    .card .dates { margin: 0 0 12px; font: 600 13px/1.3 system-ui, sans-serif;
+                   letter-spacing: .04em; text-transform: uppercase; color: var(--card-muted); }
+    .card p { margin: 0 0 10px; }
+    .card .note { font: 13px/1.45 system-ui, sans-serif; color: var(--card-muted);
+                  border-top: 1px solid rgba(128,128,128,.3); padding-top: 8px; margin-top: 12px; }
+    .spacer { height: 40vh; }
+
+    /* Permanent text labels placed on the map (used for the Haiti stop). */
+    .map-label {
+      background: var(--card-bg); color: var(--card-text); border: 1px solid var(--accent);
+      font: 600 13px/1.2 system-ui, sans-serif; box-shadow: none;
+    }
+
+    /* PHONES: text boxes sit along the bottom so the map is visible above them. */
+    @media (max-width: 700px) {
+      .step { align-items: flex-end; padding-bottom: 6vh; }
+      .card { margin: 0 auto; max-width: none; font-size: 16px; padding: 16px 18px; }
+    }
+
+    /* Respect visitors who turn off animations in their device settings. */
+    @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+  </style>
+</head>
+<body>
+
+  <div id="map" role="img" aria-label="Map that changes as you scroll through the story"></div>
+  <div id="topbar"><a id="fullscreen-link" href="#" target="_blank" rel="noopener">Open full screen ↗</a></div>
+  <main id="story"></main>
+
+<script>
+/* =====================================================================
+   ✏️  YOUR CONTENT GOES HERE — this is the only part you need to edit.
+   =====================================================================
+
+   Each stop is one block between { and }, separated by commas.
+   The stops appear in the order you list them. To reorder, cut and
+   paste whole blocks. To add one, copy a block and change its values.
+
+   FIELDS
+   ------
+   title      Heading shown in the text box.
+   dates      Small line under the heading (optional; use "" to hide).
+   text       The paragraphs. Wrap each paragraph in <p> ... </p>.
+   lat, lng   The point the map centres on. Find these by right-clicking
+              a place in Google Maps: the first number is lat, second lng.
+   zoom       How close to zoom: 2 = whole world, 4 = a large region,
+              6 = one country, 8 = a city area.
+
+   OPTIONAL HISTORICAL OUTLINES (see the notes at the bottom of this file)
+   year       Draw historical borders from this year's map. Available
+              years include 1492, 1530, 1600, 1650, 1700, 1715, 1783,
+              1800, 1815, 1880, 1900, 1914, 1920, 1938, 1945, 1960, 1994.
+              Leave it out to show no historical borders.
+   highlight  Names of territories (as spelled in that year's file) to
+              colour in. e.g. ["British East Africa"]
+   ruler      Colour every territory controlled by these powers, as
+              spelled in that year's file. e.g. ["France"]
+   label      A text label pinned to the map, for places the dataset is
+              missing or gets wrong: { lat: 0, lng: 0, text: "..." }
+   note       Small grey note at the bottom of the box (sources, caveats).
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   DATASET NAME CHECKS (read this before editing highlight / ruler lists)
+   Every "highlight" and "ruler" value below was checked against the
+   historical-basemaps file for that stop's year on 19 Nov 2026.
+     ✅ = the exact spelling exists in that year's file.
+     ⚠️ CHECK = the spelling exists, but the outline does something you
+        might not expect (wrong extent, odd spelling, missing place).
+        Have a look at these on the map and decide if you are happy.
+   If the dataset is updated and a name changes, the page won't break:
+   that territory simply stops being coloured.
+   --------------------------------------------------------------------- */
+
+const STOPS = [
+
+  /* ======================= INTRODUCTION ======================= */
+
+  {
+    title: "A History of Colonialism",
+    dates: "Colonisers and the colonised · 1415–1975",
+    text: `<p>Colonialism is the rule of one society over the territory and people of another by a state or company whose centre of power lies elsewhere. Osterhammel (2005) adds that a foreign minority decides for a colonised majority, serves interests set in a distant home country (the metropole), and justifies itself by a belief in its own cultural superiority.</p>
+           <p>Between Portugal's seizure of Ceuta in 1415 and the end of its African empire in 1975, a small number of states used this form of rule to reorganise most of the world. Scroll to follow the colonisers, then the colonised.</p>`,
+    lat: 12, lng: 20, zoom: 2,
+    year: 1914,
+    // ✅ 1914 SUBJECTO values. The file uses BOTH spellings for Britain, so keep both.
+    ruler: ["United Kingdom of Great Britain and Ireland", "United Kingdom", "France", "Portugal", "Belgium", "Italy", "German Empire"],
+    // ✅ 1914 NAME values. These are listed by name because the file gives them no ruling power.
+    highlight: ["German South-West Africa", "Kamerun", "Togoland", "Netherlands Indies", "Philippines", "Empire of Japan"],
+    note: "Shaded: territory the 1914 dataset assigns to Britain, France, Portugal, Belgium, Italy and Germany (home countries included), plus the Netherlands Indies, the Philippines and Japan's empire. Borders are approximate and show claims, not control on the ground. Historians do not agree on one definition of colonialism."
+  },
+  {
+    title: "Imperialism and informal empire",
+    dates: "Key terms",
+    text: `<p>Imperialism is the wider term: every policy by which a state extends its power over others, including influence that stops short of formal rule. Gallagher and Robinson (1953) called this informal empire: control through treaties, debt, trade and naval force, as Britain practised it in nineteenth-century Latin America and China, without annexation.</p>
+           <p>Formal rule had its own vocabulary: chartered companies with powers of war and government; protectorates that left a ruler nominally sovereign; indirect rule through local authorities; and, after 1919, League of Nations mandates.</p>`,
+    lat: 28, lng: 112, zoom: 4,
+    year: 1880,
+    highlight: ["Hong Kong"],   // ✅ 1880 NAME (a very small outline)
+    label: { lat: 22.3, lng: 114.17, text: "Hong Kong (British after the Opium Wars)" },
+    note: "Informal empire leaves no border to draw. The 1880 map shows Qing China (‘Manchu Empire’ in the dataset) intact, with only Hong Kong formally British."
+  },
+  {
+    title: "Three types of colony",
+    dates: "Exploitation · Maritime enclave · Settlement",
+    text: `<p>Osterhammel distinguishes exploitation colonies (British India, the Belgian Congo), where a small foreign class extracted taxes, labour and commodities; maritime enclaves (Macau, early Singapore), fortified ports for trade and naval power; and settlement colonies (Australia, Algeria), where permanent migrants took land from the existing inhabitants. Many places passed through more than one type.</p>
+           <p>Wolfe (2006) argued that settler colonialism seeks land rather than labour, so invasion is "a structure not an event". Critics note this fits Australia better than South Africa or Kenya, where settlers depended on African labour.</p>`,
+    lat: 5, lng: 75, zoom: 2,
+    year: 1914,
+    highlight: ["British Raj", "Belgian Congo", "Australia", "Algeria"],   // ✅ 1914 NAMEs
+    note: "Shaded: British India and the Belgian Congo (exploitation); Australia and Algeria (settlement). Enclaves such as Macau are too small for this dataset to outline."
+  },
+  {
+    title: "Five phases, 1415–1975",
+    dates: "Chronology",
+    text: `<p><strong>c. 1415–1600:</strong> Portugal and Castile build maritime empires; conquest of the Americas brings catastrophic population loss. <strong>c. 1600–1800:</strong> Dutch, English and French companies and plantation colonies, supplied by a slave trade that embarked about 12.5 million Africans. <strong>c. 1776–1825:</strong> most of the Americas breaks away.</p>
+           <p><strong>c. 1870–1914:</strong> the New Imperialism partitions Africa and much of Asia and the Pacific; mandates after 1919 take empires to their greatest extent. <strong>From the late 1940s:</strong> decolonisation, ending for the largest empires with Portugal's withdrawal from Africa in 1974–75.</p>`,
+    lat: 37.5, lng: -5.3, zoom: 5,
+    year: 1492,
+    // ⚠️ CHECK: the 1492 file spells Castile "Castille" (two Ls). That is the dataset's spelling, not a typo here.
+    highlight: ["Portugal", "Castille"],
+    label: { lat: 35.89, lng: -5.32, text: "Ceuta, taken by Portugal in 1415" },
+    note: "Borders from the 1492 file, the earliest in the dataset; most are low-precision. Of the 12.5 million Africans embarked, about 10.7 million survived the crossing (Eltis and Richardson, 2010)."
+  },
+  {
+    title: "Eleven colonisers, sixteen colonised",
+    dates: "Scope and evidence",
+    text: `<p>Part A follows eleven colonising states: five Western European maritime powers, three later European entrants, and Russia, Japan and the United States, included because the old "saltwater" test excluded overland conquest by definition (Burbank and Cooper, 2010).</p>
+           <p>Part B follows sixteen colonised countries, shaded here. Nine dealt with more than one foreign power.</p>
+           <p>Much of the record is uncertain: population figures, death tolls and wealth transfers can vary by a factor of two or more. Where they do, these cards give the range.</p>`,
+    lat: 5, lng: 30, zoom: 2,
+    year: 1914,
+    // ✅ 1914 NAMEs for fifteen of the sixteen Part B cases.
+    // ⚠️ CHECK: Korea has no outline of its own in 1914 (it is inside "Empire of Japan"), so it is not shaded here.
+    highlight: ["Mexico", "Peru", "Brazil", "Haiti", "Algeria", "Belgian Congo", "Nigeria", "British East Africa", "South Africa",
+                "British Raj", "Netherlands Indies", "French Indochina", "Philippines", "Australia", "New Zealand"],
+    note: "The Part B cases on 1914 borders. Korea has no separate outline in this file. Germany, Italy and Russia have no Part B case; their colonies are covered in their own stops."
+  },
+
+  /* ======================= PART A: THE COLONISERS ======================= */
+
+  {
+    title: "Portugal",
+    dates: "Coloniser · 1415–1999",
+    text: `<p><strong>Held:</strong> Atlantic islands; Brazil; Angola, Mozambique, Guinea-Bissau, Cape Verde, São Tomé and Príncipe; Goa; Malacca; Macau; East Timor.</p>
+           <p>The first European overseas empire. In Asia it was a chain of fortified ports backed by armed shipping; in the Atlantic, sugar and enslaved African labour created the plantation model. Portuguese and Brazilian ships carried nearly half of all Africans embarked.</p>
+           <p>In Africa, law divided "civilised" <em>assimilados</em> from "native" <em>indígenas</em>, and forced labour lasted until 1961. Three colonial wars led to the 1974 Carnation Revolution and independence within eighteen months.</p>
+           <p><em>See also: Brazil, India, Indonesia, Kenya.</em></p>`,
+    lat: -8, lng: -12, zoom: 3,
+    year: 1783,
+    // ✅ 1783 NAMEs.
+    // ⚠️ CHECK: the 1783 file has no Portuguese outline for Angola (the area is drawn as "Congo" and "Lunda"), so a label marks Luanda instead.
+    highlight: ["Portugal", "Viceroyalty of Brazil", "Portuguese East Africa", "Portuguese Guinea", "Goa"],
+    label: { lat: -8.84, lng: 13.23, text: "Luanda (Angola), founded 1576" },
+    note: "1783 borders. Angola has no Portuguese outline in this file, so a label marks it. Slave-trade share from Eltis and Richardson (2010). Rapid withdrawal was followed by long civil wars in Angola and Mozambique. Portugal has not adopted a reparations policy."
+  },
+  {
+    title: "Spain",
+    dates: "Coloniser · 1492–1976",
+    text: `<p><strong>Held:</strong> the Caribbean; the viceroyalties of New Spain, Peru, New Granada and Río de la Plata; the Philippines; Equatorial Guinea; northern Morocco; Western Sahara.</p>
+           <p>Conquest relied on Indigenous allies, epidemic smallpox and divisions within the Mexica and Inca empires (Restall, 2003). Spain then built a bureaucratic state of viceroys, courts and Church, with law dividing a "republic of Indians" from a "republic of Spaniards".</p>
+           <p>Silver from Potosí and Zacatecas, mined partly by forced labour drafts, was the economic core. Wars of 1810–25 ended mainland rule; Cuba, Puerto Rico and the Philippines went in 1898.</p>
+           <p><em>See also: Mexico, Peru, Haiti, Philippines.</em></p>`,
+    lat: 5, lng: -80, zoom: 3,
+    year: 1783,
+    // ✅ 1783 SUBJECTO "Spain" colours New Spain, Peru, New Granada, Río de la Plata, Paraguay and Spain itself.
+    // ⚠️ CHECK: the 1783 file does not assign Cuba, Hispaniola or the Philippines to Spain, so they stay unshaded.
+    ruler: ["Spain"],
+    note: "1783 borders; the file leaves Cuba, Hispaniola and the Philippines unassigned. Estimates of the Americas' pre-contact population range from under 15 million to over 100 million; most agree it fell by well over half within a century (Livi Bacci, 2008). In 2019 Spain rejected Mexico's request for an apology."
+  },
+  {
+    title: "The Netherlands",
+    dates: "Coloniser · 1602–1975",
+    text: `<p><strong>Held:</strong> the Dutch East Indies; Ceylon; the Cape; Malacca; north-east Brazil; New Netherland; Suriname; Curaçao; Gold Coast forts.</p>
+           <p>The empire began as a business. The VOC (1602), a chartered company with the right to wage war, pursued spice monopolies by force: in 1621 most of the Banda Islands' roughly 15,000 people were killed, enslaved or driven out. Dutch ships carried about half a million enslaved Africans.</p>
+           <p>After 1830 the Cultivation System made Javanese villages grow export crops for the state. The Netherlands fought Indonesian independence until 1949, and apologised for that war and for slavery in 2022–23.</p>
+           <p><em>See also: Indonesia, South Africa, Brazil, India.</em></p>`,
+    lat: -5, lng: 70, zoom: 3,
+    year: 1783,
+    // ✅ 1783 NAMEs.
+    // ⚠️ CHECK: "Dutch East Indies" in 1783 is drawn as the whole archipelago, far more than the VOC actually held.
+    // ⚠️ CHECK: Suriname has no Dutch outline in the 1783 file. "Dutch settlements" is the area inland of the Cape.
+    highlight: ["Netherlands", "Cape Colony", "Dutch settlements", "Ceylon (Dutch)", "Cochin", "Malabar", "Dutch East Indies", "Netherlands Antilles"],
+    note: "1783 borders. The ‘Dutch East Indies’ outline covers the whole archipelago, far more than the VOC controlled. At its peak the Cultivation System supplied, by some estimates, around a third of Dutch state revenue (Ricklefs, 2008). Caribbean islands remain in the Kingdom."
+  },
+  {
+    title: "Britain",
+    dates: "Coloniser · 1607–1997",
+    text: `<p><strong>Held:</strong> thirteen American colonies; Caribbean islands; Canada; India, Burma, Malaya; Australia and New Zealand; South Africa; Nigeria, Kenya and other African territories; Egypt; Middle Eastern mandates.</p>
+           <p>The largest empire in history covered about a quarter of the world's land in the early 1920s, assembled without a single plan. Britain was the largest carrier in the eighteenth-century slave trade; at abolition, owners received £20 million and the formerly enslaved nothing.</p>
+           <p>Settler colonies became self-governing dominions. Elsewhere small services ruled through princes, the Indian Army and chiefs under indirect rule. Decolonisation included counter-insurgencies in Malaya, Kenya, Cyprus and Aden.</p>
+           <p><em>See also: India, Nigeria, Kenya, South Africa, Australia, New Zealand, Indonesia.</em></p>`,
+    lat: 15, lng: 40, zoom: 2,
+    year: 1920,
+    // ✅ 1920 SUBJECTO values (both spellings are used in the file).
+    ruler: ["United Kingdom of Great Britain and Ireland", "United Kingdom"],
+    // ✅ 1920 NAMEs. Listed by name because the 1920 file records most colonies as their own ruler
+    //    (e.g. Nigeria's SUBJECTO is "Nigeria"), so "ruler" alone would miss them.
+    // ⚠️ CHECK: the 1920 file uses MODERN names for many colonies ("Ghana", "Zambia", "Zimbabwe", "Malawi",
+    //    "Malaysia", "Tanzania, United Republic of"). They are correct for this file even though they look wrong for 1920.
+    highlight: ["British Raj", "Ceylon", "Malaysia", "Hong Kong", "Canada", "Dominion of Newfoundland", "Australia", "New Zealand",
+                "Union of South Africa", "Botswana", "Lesotho", "Swaziland", "Zimbabwe", "Zambia", "Malawi",
+                "Tanzania, United Republic of", "Kenya", "Uganda", "Sudan", "Nigeria", "Ghana", "Sierra Leone", "Gambia, The",
+                "Jamaica", "Trinidad", "Barbados", "Guyana", "Belize"],
+    note: "1920 borders, matched by name; the file labels several colonies with modern names. Canada, Australia, New Zealand and South Africa were self-governing dominions. Whether the empire spread liberal institutions (Ferguson, 2003) or cannot be separated from its violence (Elkins, 2022) is disputed."
+  },
+  {
+    title: "France",
+    dates: "Coloniser · 1608 to the present",
+    text: `<p><strong>Held:</strong> New France; Saint-Domingue and Caribbean islands; Algeria, Tunisia, Morocco; French West and Equatorial Africa; Madagascar; Indochina; Syria and Lebanon; Pacific territories.</p>
+           <p>France built two empires: the first, in North America and the Caribbean, largely lost by 1815; the second, from Algiers in 1830, the world's second largest. Its "civilising mission" promised assimilation, but most subjects fell under the <em>indigénat</em>, with fines and prison imposed without trial.</p>
+           <p>French Africa relied on forced labour and appointed chiefs. France fought to keep Indochina and Algeria; in 1960 fourteen African territories became independent, with defence pacts and the CFA franc keeping ties close.</p>
+           <p><em>See also: Haiti, Algeria, Vietnam, India.</em></p>`,
+    lat: 18, lng: 30, zoom: 2,
+    year: 1938,
+    ruler: ["France"],   // ✅ 1938 SUBJECTO (also shades France itself)
+    // ✅ 1938 NAMEs for French territories the file does not assign to France.
+    // ⚠️ CHECK: the 1938 file wrongly gives "Cambodia" and "Cochin China" to "Empire of Japan"; naming them here shades them as French.
+    highlight: ["Tunisia", "French Somaliland", "French Guiana", "Laos", "Cambodia", "Cochin China"],
+    note: "1938 borders, near the second empire's greatest extent; France itself is shaded too. Deaths building the Congo–Ocean railway are estimated from around 15,000 to considerably more. A 2005 law requiring schools to teach colonisation's ‘positive role’ was repealed in 2006."
+  },
+  {
+    title: "Belgium",
+    dates: "Coloniser · 1885–1962",
+    text: `<p><strong>Held:</strong> the Congo Free State (1885–1908, King Leopold II's personal possession); the Belgian Congo (1908–1960); Ruanda-Urundi (1916–1962).</p>
+           <p>Belgium became a colonial power through its king's private ambition. The Berlin Conference recognised the Congo as Leopold's own in 1885; rubber quotas enforced by the Force Publique made it an international scandal, and parliament annexed it in 1908.</p>
+           <p>The Belgian Congo was run by a "colonial trinity" of state, Catholic missions and large companies. In Ruanda-Urundi, Belgium ruled through Tutsi monarchies and recorded Hutu, Tutsi and Twa on identity documents.</p>
+           <p><em>See also: Democratic Republic of the Congo.</em></p>`,
+    lat: -3, lng: 23, zoom: 4,
+    year: 1938,
+    highlight: ["Belgian Congo", "Rwanda (Belgium)", "Burundi"],   // ✅ 1938 NAMEs
+    note: "1938 borders. Mamdani (2001) argues colonial rule racialised Hutu and Tutsi identities, feeding the 1994 genocide; others stress pre-colonial inequality and later politics. King Philippe expressed ‘deepest regrets’ in 2020, without a formal apology."
+  },
+  {
+    title: "Germany",
+    dates: "Coloniser · 1884–1919",
+    text: `<p><strong>Held:</strong> German South West Africa (Namibia); German East Africa (mainland Tanzania, Rwanda, Burundi); Kamerun; Togo; New Guinea and Pacific islands; Kiautschou in China.</p>
+           <p>A thirty-five-year empire that included what many historians call the first genocide of the twentieth century. After the Herero rose in 1904, General von Trotha drove survivors into the desert and ordered every Herero shot. The Nama rose in turn; survivors were held in concentration camps.</p>
+           <p>In East Africa the Maji Maji war (1905–07), a revolt against compulsory cotton growing, was met with scorched earth and famine. The colonies became League of Nations mandates in 1919.</p>
+           <p><em>No Part B case: Namibia and Tanzania are covered here.</em></p>`,
+    lat: -5, lng: 22, zoom: 3,
+    year: 1914,
+    // ✅ 1914 NAMEs (note the dataset's exact punctuation in the East Africa name).
+    highlight: ["German South-West Africa", "German E. Africa (Tanganyika)", "Kamerun", "Togoland"],
+    note: "Commonly cited estimates: around 80 per cent of the Herero and half of the Nama died in 1904–08; Maji Maji deaths range from about 75,000 to 300,000. Germany recognised the genocide ‘from today's perspective’ in 2021; leading Ovaherero and Nama organisations rejected the declaration."
+  },
+  {
+    title: "Italy",
+    dates: "Coloniser · 1882–1960",
+    text: `<p><strong>Held:</strong> Eritrea; Italian Somaliland; Libya; the Dodecanese; Ethiopia (1936–1941); Albania (1939–1943).</p>
+           <p>Small and short-lived, but among the most violent. Menelik II's army defeated Italy at Adwa in 1896, a lasting symbol of African resistance. In Libya, the fascist "reconquest" deported around 100,000 people from Cyrenaica to desert concentration camps in 1930–31.</p>
+           <p>The 1935 invasion of Ethiopia, the last large war of colonial conquest, used mustard gas on soldiers and civilians. Italy renounced its colonies in 1947 and long remembered its rule as benign: <em>Italiani, brava gente</em>.</p>
+           <p><em>No Part B case: Libya and Ethiopia are covered here.</em></p>`,
+    lat: 16, lng: 28, zoom: 4,
+    year: 1938,
+    // ✅ 1938 NAMEs. "Libya" is plain "Libya" in 1938 (it is "Libya (IT)" in the 1920 file).
+    highlight: ["Libya", "Eritrea (Italy)", "Ethiopia (Italy)", "Italian Somaliland"],
+    label: { lat: 14.17, lng: 38.9, text: "Adwa, 1896" },
+    note: "1938 borders. Deaths in the Cyrenaican camps are estimated from about 40,000 upwards; Ahmida (2021) argues the campaign was genocidal. Italy acknowledged using gas only in 1996, and apologised to Libya in 2008."
+  },
+  {
+    title: "Russia",
+    dates: "Coloniser · 1552–1917, continuities to 1991 debated",
+    text: `<p><strong>Held:</strong> the Volga; Siberia and the Pacific coast; the Caucasus; the Kazakh steppe and Central Asia; Alaska (1799–1867).</p>
+           <p>Russia expanded over land, so the "saltwater" convention did not count it as colonial; historians now widely accept that much of it was. In Siberia the state took fur tribute, often by hostage-taking. In 1863–64 most Circassians were expelled to the Ottoman Empire.</p>
+           <p>Central Asia, taken in the 1860s–70s, most resembled overseas colonialism: military rule over a distinct Muslim population, cotton for Russian mills, and settlers on Kazakh and Kyrgyz grazing land.</p>
+           <p><em>No Part B case: Central Asia is covered here.</em></p>`,
+    lat: 55, lng: 80, zoom: 3,
+    year: 1900,
+    // ✅ 1900 NAME.
+    // ⚠️ CHECK: one outline covers the whole empire, the Russian heartland included; the file does not separate Turkestan, Siberia or the Caucasus.
+    highlight: ["Russian Empire"],
+    note: "1900 borders; one outline covers heartland and conquests alike. Whether the Soviet Union was a colonial empire is disputed. The Kazakh famine of 1930–33 killed about 1.5 million people (Cameron, 2018). Richmond (2013) argues the Circassian expulsion was genocide."
+  },
+  {
+    title: "Japan",
+    dates: "Coloniser · 1869–1945",
+    text: `<p><strong>Held:</strong> Hokkaido and the Ryukyus; Taiwan; southern Sakhalin; Korea; Micronesia; Manchukuo; occupied China and Southeast Asia.</p>
+           <p>The only non-Western overseas colonial empire of the age, built partly to avoid being colonised: after the "unequal treaties" of the 1850s, Meiji leaders concluded that survival required colonies. Rule was intensive: land surveys, large police forces, assimilation campaigns.</p>
+           <p>In 1941–42 Japan occupied Southeast Asia's Western colonies. Occupation brought forced labour and military sexual slavery; it also dismantled European authority and armed nationalists. Defeat in 1945 removed the empire entirely.</p>
+           <p><em>See also: Korea, Indonesia, Philippines, Vietnam.</em></p>`,
+    lat: 36, lng: 132, zoom: 4,
+    year: 1938,
+    // ✅ 1938 NAMEs. The single "Empire of Japan" outline includes Korea, Taiwan and Manchuria (Manchukuo).
+    // ⚠️ CHECK: do NOT switch this to ruler: ["Empire of Japan"] — in the 1938 file that would also shade Cambodia and Cochin China.
+    highlight: ["Empire of Japan", "Saipan"],
+    note: "1938 borders; one ‘Empire of Japan’ outline takes in Korea, Taiwan and Manchukuo. Whether Japanese rule laid foundations for later growth (Kohli, 2004) or mainly served Japanese needs (Haggard, Kang and Moon, 1997) is debated."
+  },
+  {
+    title: "United States",
+    dates: "Coloniser · 1783 to the present",
+    text: `<p><strong>Held:</strong> continental land taken from Native nations and Mexico; Hawaii; Puerto Rico, Guam, the Philippines; American Samoa; the Panama Canal Zone; the US Virgin Islands; Pacific trust territories.</p>
+           <p>Founded in revolt against colonial rule, it became colonial twice over. On the continent it was a settler state: removal (the Cherokee Trail of Tears, 1838–39), war with Mexico, and allotment that cut Native landholding from 138 million acres to 48 million by 1934.</p>
+           <p>After 1898 it took overseas colonies never meant to become states. Five inhabited territories remain, with limited or no federal representation.</p>
+           <p><em>See also: Philippines, Haiti, Vietnam.</em></p>`,
+    lat: 32, lng: -105, zoom: 3,
+    year: 1938,
+    ruler: ["United States"],   // ✅ 1938 SUBJECTO: shades the USA (with Alaska and Hawaii), the Philippines and Guam
+    highlight: ["Puerto Rico", "American Samoa", "United States Virgin Islands"],   // ✅ 1938 NAMEs
+    note: "1938 borders; the Philippines, Guam and Samoa are shaded but lie off this view. In 1940 about one in eight people under US rule lived in overseas territories (Immerwahr, 2019). Madley (2016) argues the killing of Native Californians was genocide."
+  },
+
+  /* ======================= PART B: THE COLONISED ======================= */
+  /* ---------- The Americas ---------- */
+
+  {
+    title: "Mexico",
+    dates: "Colonised by Spain · 1521–1821",
+    text: `<p>In 1519 the Mexica (Aztec) Triple Alliance, centred on Tenochtitlan, took tribute from dozens of resentful city-states. Cortés's few hundred Spaniards won with Tlaxcalan and other Indigenous allies, who formed most of the besieging force, and with smallpox. The city fell on 13 August 1521.</p>
+           <p>New Spain ran on <em>encomienda</em> and rotational labour, mass conversion and silver. Indigenous communities kept nobles, councils and land for generations.</p>
+           <p>Hidalgo's 1810 revolt opened a mass insurgency; independence came in 1821 on conservative terms. Indigenous movements such as the Zapatistas (1994) argue that mestizo nationalism marginalised them in turn.</p>`,
+    lat: 23, lng: -102, zoom: 4,
+    year: 1783,
+    highlight: ["Viceroyalty of New Spain"],   // ✅ 1783 NAME
+    note: "Outline: the Viceroyalty of New Spain in 1783, far larger than modern Mexico. Central Mexico's 1519 population is estimated at 5 to 25 million, falling to 1–1.5 million by the early 1600s (Livi Bacci, 2008). The starting figure is uncertain; the scale of the decline is not."
+  },
+  {
+    title: "Peru",
+    dates: "Colonised by Spain · 1532–1824",
+    text: `<p>The Inca state, Tawantinsuyu, ruled the Andes through local lords (<em>kurakas</em>), roads and rotational labour (<em>mit'a</em>). Weakened by epidemic and civil war, it lost its ruler Atahualpa to Pizarro's ambush in 1532; a Neo-Inca state held out until 1572.</p>
+           <p>Viceroy Toledo moved communities into planned towns and turned the <em>mit'a</em> into a forced draft for the Potosí silver mines: about one in seven adult men each year. Kurakas served as intermediaries.</p>
+           <p>The Túpac Amaru rebellion (1780–83) was Spanish America's largest. Independence, secured in 1824, changed rulers more than social structures: Indigenous tribute lasted until 1854.</p>`,
+    lat: -15, lng: -70, zoom: 4,
+    year: 1783,
+    // ✅ 1783 NAME.
+    // ⚠️ CHECK: the 1783 file draws Potosí (now Bolivia) inside this outline. In the 1700 file Potosí falls outside it, so 1783 was chosen.
+    highlight: ["Viceroyalty of Peru"],
+    label: { lat: -19.58, lng: -65.75, text: "Potosí silver mines" },
+    note: "Outline: the Viceroyalty of Peru in 1783, the time of the Túpac Amaru rebellion; borders approximate. Deaths in the rebellion are estimated at up to 100,000 (Walker, 2014). Dell (2010) finds households in former draft districts still consume less today."
+  },
+  {
+    title: "Brazil",
+    dates: "Colonised by Portugal · 1500–1822 · Dutch in the north-east 1630–1654",
+    text: `<p>Claimed in 1500, Brazil began with brazilwood traded from Tupi-speaking peoples and became a sugar colony. Planters first enslaved Indigenous workers, then Africans: about 4.8 million arrived, roughly 45 per cent of all who survived the Atlantic crossing. Escaped slaves built <em>quilombos</em>; the largest, Palmares, held out until 1694–95.</p>
+           <p>The Dutch West India Company held Recife and Pernambuco from 1630 to 1654. Gold in Minas Gerais drew the colony's centre south from the 1690s.</p>
+           <p>Independence in 1822, under the Portuguese king's son, preserved monarchy, unity and slavery, which ended only in 1888, with no land or compensation for the freed.</p>`,
+    lat: -13, lng: -45, zoom: 4,
+    year: 1700,
+    // ✅ 1700 NAME (a coastal strip).
+    // ⚠️ CHECK: the 1700 file has a "Dutch Brazil" outline, but it sits on the Guiana coast, not at Recife, and the Dutch
+    //    had left Brazil by 1654. It is deliberately NOT highlighted; a label marks Recife instead.
+    highlight: ["Portuguese Brazil"],
+    label: { lat: -8.05, lng: -34.9, text: "Recife: Dutch Brazil, 1630–1654" },
+    note: "Outline: ‘Portuguese Brazil’ in the 1700 file, a coastal strip. A label marks Dutch Recife because the file's own ‘Dutch Brazil’ outline is misplaced. Figures from Eltis and Richardson (2010). Freyre's ‘racial democracy’ is contested by later scholars and Black Brazilian movements."
+  },
+  {
+    title: "Haiti",
+    dates: "Spain 1492–1697 · France 1697–1804 · US occupation 1915–1934",
+    text: `<p>Spain's first American colony destroyed Taíno society within decades. The western third, ceded to France in 1697 as Saint-Domingue, became the most profitable colony in the Americas, worked by roughly half a million enslaved people.</p>
+           <p>The insurrection of August 1791, led in time by Toussaint Louverture, defeated British, Spanish and Napoleonic armies. Haiti declared independence on 1 January 1804: the only state founded by a successful revolt of enslaved people.</p>
+           <p>Colonial power continued through debt and occupation. In 1825 France demanded 150 million francs as the price of recognition; US forces occupied Haiti from 1915 to 1934.</p>`,
+    lat: 19, lng: -72.6, zoom: 7,
+    year: 1783,
+    // ⚠️ CHECK: the 1783 file has no outline at all for Hispaniola / Saint-Domingue, hence the label (kept from the original page).
+    label: { lat: 19.1, lng: -72.4, text: "Saint-Domingue (French)" },
+    note: "The 1783 dataset has no outline for Saint-Domingue, so a label marks it. The indemnity was cut to 90 million francs in 1838; its long-run cost is modelled at US$21–115 billion (Porter et al., 2022). In 2025 France called it unjust without addressing restitution."
+  },
+
+  /* ---------- Africa ---------- */
+
+  {
+    title: "Algeria",
+    dates: "Colonised by France · 1830–1962",
+    text: `<p>Before 1830 Algiers was a largely self-governing Ottoman regency. France captured the city in 1830; conquest took decades of crop burning and collective punishment against resistance led by Emir Abd el-Kader.</p>
+           <p>Algeria became a settler colony, its north declared part of France. About a million <em>pieds-noirs</em> came to own much of the best farmland, while Algerian Muslims were subjects, not citizens, under the <em>indigénat</em>.</p>
+           <p>The FLN launched the war of independence in 1954. France answered with conscripts, systematic torture and the regroupment of over two million villagers. Independence came on 5 July 1962.</p>`,
+    lat: 29, lng: 3, zoom: 4,
+    year: 1914,
+    highlight: ["Algeria"],   // ✅ 1914 NAME (SUBJECTO "France")
+    note: "1914 borders. Algerian deaths in the war: 1.5 million by the Algerian state's figure; many historians estimate 300,000–500,000. Estimates for the Sétif repression of 1945 run from 1,500 to 45,000. The population may have fallen from about 3 to 2 million during conquest (McDougall, 2017)."
+  },
+  {
+    title: "Democratic Republic of the Congo",
+    dates: "Leopold II 1885–1908 · Belgium 1908–1960",
+    text: `<p>The Kingdom of Kongo dealt with Portugal from 1483, and the Atlantic slave trade drew on the region for three centuries. Inland lay the Luba, Lunda and Kuba kingdoms.</p>
+           <p>Under Leopold's Congo Free State, villages owed rubber quotas enforced by the Force Publique through hostage-taking, burning and mutilation. Belgian rule from 1908 ended the worst abuses but kept compulsion: forced cotton, head taxes, mine recruitment.</p>
+           <p>Independence on 30 June 1960 was sudden. Within days the army mutinied and Katanga seceded with Belgian support; Prime Minister Patrice Lumumba was killed in January 1961.</p>`,
+    lat: -3, lng: 23, zoom: 4,
+    year: 1914,
+    highlight: ["Belgian Congo"],   // ✅ 1914 NAME
+    note: "1914 borders. No census was taken: Hochschild (1998), after Vansina, suggests the population may have halved, by roughly ten million. Critics question the baseline and stress epidemics. Most historians accept a very large decline without agreeing on its size."
+  },
+  {
+    title: "Nigeria",
+    dates: "Colonised by Britain · 1861–1960",
+    text: `<p>British rule joined very different societies into one territory: the Sokoto Caliphate, the Yoruba states, the Kingdom of Benin, decentralised Igbo communities and the Niger Delta city-states.</p>
+           <p>Britain annexed Lagos in 1861, sacked Benin City in 1897 and amalgamated north and south in 1914. Lugard's indirect rule worked through northern emirs; in the south-east, appointed "warrant chiefs" provoked the Women's War of 1929.</p>
+           <p>Nationalism took a regional shape, and independence came on 1 October 1960. The strains led to the Biafra war of 1967–70.</p>`,
+    lat: 9.5, lng: 8, zoom: 5,
+    year: 1914,
+    highlight: ["Nigeria"],   // ✅ 1914 NAME
+    note: "1914 borders, the year of amalgamation. Biafra war deaths, mostly from famine, are estimated at half a million to two million. How far the conflict stems from colonial boundaries and indirect rule, or from choices after 1960, is debated. Germany transferred ownership of over a thousand Benin Bronzes to Nigeria in 2022."
+  },
+  {
+    title: "Kenya",
+    dates: "Portugal and Oman on the coast · Britain 1895–1963",
+    text: `<p>The Swahili coast was ruled in turn by Portugal (Fort Jesus, 1593), Oman and Zanzibar. Britain declared the East Africa Protectorate in 1895 and built the Uganda Railway with about 32,000 indentured Indian workers.</p>
+           <p>Officials reserved the central "White Highlands" for European settlers. Kikuyu, Maasai and others lost land, were confined to reserves, taxed into wage labour and made to carry the <em>kipande</em> pass.</p>
+           <p>The Mau Mau rising brought a State of Emergency (1952–60): mass detention, around a million Kikuyu forcibly resettled, more than a thousand hanged. Independence followed on 12 December 1963.</p>`,
+    lat: 0.5, lng: 38, zoom: 5,
+    year: 1914,
+    highlight: ["British East Africa"],   // ✅ 1914 NAME (kept from the original page)
+    note: "The 1914 outline includes Jubaland, transferred to Italy in 1925. Elkins's (2005) higher death estimates are disputed, but her evidence of systematic torture has been confirmed. In 2013 Britain paid £19.9 million to 5,228 claimants, expressing ‘sincere regret’."
+  },
+  {
+    title: "South Africa",
+    dates: "Dutch East India Company 1652–1795 · Britain 1795–1910",
+    text: `<p>Khoikhoi herders and San hunter-gatherers lived at the Cape, with Xhosa, Zulu, Sotho and Tswana farmers to the east and north, when the Dutch company founded a supply station in 1652. Settlers took land and cattle and imported enslaved people.</p>
+           <p>Britain took the Cape in 1795. Diamonds (1867) and gold (1886) built a mining economy on African migrant labour, compounds and pass laws.</p>
+           <p>The 1910 Union reserved power for whites; the 1913 Land Act confined African land ownership to about 7 per cent of the country. Apartheid followed from 1948. Majority rule came only in 1994.</p>`,
+    lat: -29, lng: 25, zoom: 5,
+    year: 1914,
+    highlight: ["South Africa"],   // ✅ 1914 NAME (the Union of 1910)
+    note: "1914 borders. Independence from a metropole and the end of colonial relations are different things: the ANC called this ‘colonialism of a special type’. In the camps of the 1899–1902 war about 26,000 Boer women and children and at least 14,000 Black Africans died (Ross, 2008)."
+  },
+
+  /* ---------- Asia ---------- */
+
+  {
+    title: "India",
+    dates: "Britain: Company 1757–1858, Crown 1858–1947 · also Portugal, Netherlands, Denmark, France",
+    text: `<p>Around 1700 the Mughal empire was one of the world's largest economies. Europeans came as coastal traders; after Plassey (1757) and the grant of Bengal's revenues (1765), the East India Company became a territorial ruler with armies of Indian sepoys.</p>
+           <p>After the rebellion of 1857–58 the Crown took over. About a thousand senior officials governed some 300 million people through intermediaries and some 560 princely states.</p>
+           <p>Congress (1885) and Gandhi's campaigns built a mass movement. Independence on 15 August 1947 came with partition into India and Pakistan, displacing 10–20 million people.</p>`,
+    lat: 22, lng: 80, zoom: 4,
+    year: 1914,
+    // ✅ 1914 NAME. ⚠️ CHECK: this outline includes Burma, which was governed as part of British India until 1937.
+    highlight: ["British Raj"],
+    note: "The 1914 ‘British Raj’ outline includes Burma. Partition deaths are estimated at 200,000 to 2 million (Khan, 2007). Patnaik's (2017) estimate of a wealth ‘drain’ is rejected on method by Roy (2019). The Bengal famine of 1943 killed about three million (Sen, 1981)."
+  },
+  {
+    title: "Indonesia",
+    dates: "Netherlands 1602–1949 · also Portugal, Britain 1811–1816, Japan 1942–1945",
+    text: `<p>The archipelago held many states, from Majapahit to the sultanates of Aceh, Mataram and Ternate, enriched by spices grown nowhere else. The Dutch company founded Batavia in 1619 and monopolised the spice trade by force.</p>
+           <p>After the Java War (1825–30), which cost an estimated 200,000 Javanese lives, the Cultivation System forced villages to grow export crops. The outer islands were conquered only gradually.</p>
+           <p>Japan's occupation destroyed Dutch authority. Sukarno and Hatta proclaimed independence on 17 August 1945; after four years of war the Netherlands transferred sovereignty in December 1949.</p>`,
+    lat: -2, lng: 118, zoom: 4,
+    year: 1914,
+    highlight: ["Netherlands Indies"],   // ✅ 1914 NAME (the 1920 and 1938 files call it "Dutch East Indies")
+    note: "The 1914 outline shows the colony at full extent, which the Dutch controlled for only about three decades. Indonesian deaths in 1945–49 are commonly put at 100,000 or more (Ricklefs, 2008). The 1969 ‘Act of Free Choice’ in West New Guinea is still disputed."
+  },
+  {
+    title: "Vietnam",
+    dates: "France 1858–1954 · Japan 1940–1945",
+    text: `<p>Independent of China since the tenth century, Vietnam was unified by the Nguyễn dynasty in 1802. France attacked Đà Nẵng in 1858, made the south the colony of Cochinchina, and imposed protectorates on Annam and Tonkin in 1883–84.</p>
+           <p>Colonial finance rested on state monopolies in alcohol, salt and opium and on heavy taxes. Delta land was concentrated among large landlords, and rubber plantations used contract labour with very high mortality.</p>
+           <p>Hồ Chí Minh declared independence on 2 September 1945. France fought until defeat at Điện Biên Phủ in 1954; the Geneva Accords divided the country, leading to the American war.</p>`,
+    lat: 16, lng: 106, zoom: 5,
+    year: 1914,
+    // ✅ 1914 NAME. ⚠️ CHECK: the outline is the whole Indochinese Union, so Cambodia and Laos are shaded too.
+    highlight: ["French Indochina"],
+    note: "The 1914 ‘French Indochina’ outline also covers Cambodia and Laos. The famine of 1944–45 killed between about 400,000 and 2 million people; the higher figure is the Vietnamese official estimate (Goscha, 2016)."
+  },
+  {
+    title: "Philippines",
+    dates: "Spain 1565–1898 · United States 1898–1946 · Japan 1942–1945",
+    text: `<p>The islands were organised in <em>barangays</em> under <em>datus</em>, with Islamic sultanates in Sulu and Mindanao, when Spain settled Cebu in 1565. Friars were the main agents of rule: priests, landowners and supervisors of tribute and forced labour.</p>
+           <p>The Katipunan launched a revolution in 1896, and Aguinaldo declared independence on 12 June 1898. Spain instead ceded the islands to the United States for US$20 million; the war that followed crushed the first republic.</p>
+           <p>American "benevolent assimilation" built schools and an elected assembly while tying the economy to US markets. Independence came on 4 July 1946.</p>`,
+    lat: 12, lng: 122, zoom: 5,
+    year: 1900,
+    highlight: ["Philippines"],   // ✅ 1900 NAME
+    note: "1900 borders, during the Philippine–American War. Civilian deaths from violence, disease and famine are commonly estimated at around 200,000, and some estimates are far higher (Kramer, 2006). US military bases remained until 1991–92."
+  },
+  {
+    title: "Korea",
+    dates: "Colonised by Japan · protectorate 1905 · annexed 1910–1945",
+    text: `<p>The Joseon dynasty (1392–1910) limited Western contact until Japan forced the unequal Treaty of Ganghwa in 1876. A protectorate followed in 1905 and annexation in 1910, resisted by "righteous armies".</p>
+           <p>Rule began under a military gendarmerie. The March First demonstrations of 1919 were suppressed with shootings and mass arrests. Wartime policy imposed Shinto worship and Japanese names, and mobilised Koreans for forced labour and military sexual slavery.</p>
+           <p>Liberation on 15 August 1945 came with division at the 38th parallel, and two separate states by 1948.</p>`,
+    lat: 37.5, lng: 127.5, zoom: 6,
+    year: 1900,
+    // ✅ 1900 NAME. ⚠️ CHECK: 1900 is five years BEFORE the protectorate. It is used because the 1914, 1920 and 1938
+    //    files have no separate Korea outline (it is merged into "Empire of Japan").
+    highlight: ["Korea"],
+    note: "Outline: Korea in the 1900 file; later files merge it into Japan's empire. Deaths in 1919: several hundred in Japanese records, about 7,500 by Park Eun-sik's count. Whether colonial rule laid foundations for later growth is disputed (Kohli, 2004; Haggard, Kang and Moon, 1997)."
+  },
+
+  /* ---------- Oceania ---------- */
+
+  {
+    title: "Australia",
+    dates: "Colonised by Britain from 1788 · federation 1901 · legal independence 1986",
+    text: `<p>Aboriginal and Torres Strait Islander peoples had lived on the continent for at least 50,000 years, speaking some 250 languages. Britain's First Fleet arrived in 1788 and treated the land as having no prior owners, a doctrine later called <em>terra nullius</em>. No treaties were made.</p>
+           <p>Pastoral expansion brought frontier wars and massacres. After federation, "protection" regimes controlled Aboriginal people's movement, wages and marriages, and officials removed children from their families.</p>
+           <p>Independence for the settler state did not end the colonial relationship. <em>Mabo</em> (1992) recognised native title; in 2023 voters rejected an Indigenous Voice to Parliament.</p>`,
+    lat: -26, lng: 134, zoom: 4,
+    year: 1880,
+    // ✅ 1880 NAMEs for the six pre-federation colonies. ⚠️ CHECK: Tasmania has no name in the 1880 file, so it cannot be shaded.
+    highlight: ["New South Wales (UK)", "Victoria (UK)", "Queensland (UK)", "South Australia (UK)", "Western Australia (UK)", "Northern Territory (UK)"],
+    note: "1880 borders: separate British colonies before federation (Tasmania is unnamed in the file). The 1788 population is estimated at 300,000 to over a million. Reynolds (1981) estimated at least 20,000 Aboriginal deaths in frontier conflict; later research suggests more, and Windschuttle (2002) disputed the evidence."
+  },
+  {
+    title: "Aotearoa New Zealand",
+    dates: "Colonised by Britain from 1840 · dominion 1907 · legal independence 1986",
+    text: `<p>Māori settled the islands from eastern Polynesia around 1250–1300. British sovereignty rested on the Treaty of Waitangi (1840). Its English text ceded "sovereignty"; the Māori text, which most chiefs signed, used <em>kāwanatanga</em> (governance) and guaranteed <em>tino rangatiratanga</em>, full authority over lands and treasured possessions.</p>
+           <p>Settler demand for land led to wars (1845–72), the confiscation of over a million hectares, and a Native Land Court that broke up collective title.</p>
+           <p>Since 1975 the Waitangi Tribunal has heard claims of Treaty breaches; settlements have included Crown apologies, redress and the return of some land.</p>`,
+    lat: -41, lng: 173, zoom: 5,
+    year: 1914,
+    // ✅ 1914 NAME. ⚠️ CHECK: the 1880 and 1900 files label the islands "Māori" rather than as a British colony, so 1914 is used.
+    highlight: ["New Zealand"],
+    note: "1914 borders. By the 1890s the Māori population had fallen to about 42,000. Belich (1986) showed that Māori forces often outfought British troops. A bill to redefine the Treaty's principles was defeated by 112 votes to 11 in April 2025, after one of the country's largest protest marches."
+  },
+
+  /* ======================= CONCLUSION ======================= */
+
+  {
+    title: "Patterns: motives and methods",
+    dates: "Conclusion",
+    text: `<p>No single motive explains expansion. Commerce, state rivalry, religion, settlement and prestige recur in shifting proportions, and many annexations were driven by officials and companies on the spot (Darwin, 2009). Japan adds a defensive motive: colonies as a guarantee against being colonised.</p>
+           <p>Three methods recur. Rule depended on colonised intermediaries, from Tlaxcalan allies and sepoys to <em>kurakas</em> and emirs. Law divided citizens from subjects. Economies relied on coerced labour: slavery, the <em>mita</em>, the Cultivation System, rubber quotas, indenture. Extreme violence clustered at conquest and at decolonisation.</p>`,
+    lat: 12, lng: 20, zoom: 2,
+    year: 1938,
+    // ✅ 1938 SUBJECTO values. "Empire of Japan" is deliberately NOT in this list (see the Japan stop); it is highlighted by name below.
+    ruler: ["United Kingdom", "United Kingdom of Great Britain and Ireland", "France", "Portugal", "Belgium", "Italy", "Netherlands", "Spain", "United States"],
+    highlight: ["Empire of Japan", "Saipan"],   // ✅ 1938 NAMEs
+    note: "Shaded: territory the 1938 file assigns to Britain, France, Portugal, Belgium, Italy, the Netherlands, Spain and the United States, plus Japan's empire. Hobson's (1902) purely economic explanation is weakened by later research on where British capital went (Cain and Hopkins, 2016)."
+  },
+  {
+    title: "Consequences and the limits of independence",
+    dates: "Conclusion",
+    text: `<p>Demographic losses were most severe in the Americas, Australia, the Congo Free State and German South West Africa. The Atlantic slave trade displaced over twelve million Africans. Colonial economies exported raw materials through a few ports, inside borders drawn for administrative convenience.</p>
+           <p>Rule ended by revolution, negotiation, gradual constitutional change, the coloniser's defeat or revolution in the metropole. Formal independence often left continuities: debt in Haiti, bases in the Philippines and French Africa, currency ties, commodity dependence. Settler states grew wealthy while Indigenous peoples within them remained among their poorest citizens.</p>`,
+    lat: 5, lng: 20, zoom: 2,
+    year: 1960,
+    // No highlights: this stop shows the 1960 borders only.
+    note: "1960 borders, as decolonisation accelerated across Africa. Nkrumah (1965) called the continuities ‘neo-colonialism’; Cooper (2002) argues post-colonial rulers bear their own responsibility. Acemoglu, Johnson and Robinson (2001) link settlement to later institutions; Albouy (2012) questions their data."
+  },
+  {
+    title: "Memory and redress",
+    dates: "Conclusion · since about 2000",
+    text: `<p>Former colonial powers have issued a series of acknowledgements: Italy's apology to Libya (2008), Britain's Kenyan settlement (2013), the Belgian king's regrets (2020), Germany's recognition of the Herero and Nama genocide (2021), Dutch apologies (2022–23) and France on Haiti's indemnity (2025). Most stop short of legal liability or reparations, and several were rejected by the communities concerned.</p>
+           <p>Colonialism was a family of practices rather than a single system, varying with the period, the coloniser and, above all, the society colonised. Assessments of empire will continue to depend on which people, which places and which period are counted.</p>`,
+    lat: 12, lng: 20, zoom: 2,
+    year: 1994,
+    // No highlights: this stop shows the 1994 borders only (the dataset's most recent year in the list above).
+    note: "1994 borders. Text condensed from ‘A History of Colonialism: Colonisers and the Colonised’ (2026); full Harvard references are listed in that document. Restitution of looted objects, school curricula and statues remain live political arguments."
+  }
+];
+/* ======================= end of your content ======================= */
+
+
+/* ---------------------------------------------------------------------
+   BASEMAP (the background map). Pick ONE by leaving it un-commented.
+   Both are free and need no key. Keep the attribution text — it's required.
+   --------------------------------------------------------------------- */
+
+// Option A (default): OpenStreetMap. Fine for a small educational site.
+// Shows modern borders and place names, which is why it's faded above.
+const BASEMAP_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const BASEMAP_OPTIONS = {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+};
+
+// Option B: Esri World Physical — terrain only, no modern borders or labels,
+// which suits historical maps. Only goes to zoom 8. Check Esri's terms of use
+// before relying on it. To use it, delete the "//" from the next 5 lines and
+// put "//" in front of the 5 Option A lines above.
+// const BASEMAP_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}";
+// const BASEMAP_OPTIONS = {
+//   maxZoom: 8,
+//   attribution: 'Tiles &copy; Esri &mdash; Source: US National Park Service'
+// };
+
+// Where the historical borders come from (free, open dataset).
+const HISTORY_URL = "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_{year}.geojson";
+const HISTORY_CREDIT = 'Historical borders: <a href="https://github.com/aourednik/historical-basemaps">historical-basemaps</a> (Ourednik)';
+
+
+/* =====================================================================
+   You shouldn't need to change anything below this line.
+   ===================================================================== */
+
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const isPhone = () => window.innerWidth <= 700;
+const style = getComputedStyle(document.documentElement);
+const cssVar = (name) => style.getPropertyValue(name).trim();
+
+// Show the "Open full screen" link only when embedded inside another page.
+if (window.self !== window.top) {
+  document.getElementById("topbar").style.display = "block";
+  document.getElementById("fullscreen-link").href = window.location.href;
+}
+
+// --- Build the map ---
+const map = L.map("map", {
+  zoomControl: false,
+  scrollWheelZoom: false,   // scrolling moves the story, not the map
+  dragging: !L.Browser.mobile, // on phones, swipes scroll the story
+  touchZoom: false,
+  doubleClickZoom: false,
+  boxZoom: false,
+  keyboard: false,
+  preferCanvas: true,
+  worldCopyJump: true
+});
+L.tileLayer(BASEMAP_URL, Object.assign({ className: "basemap" }, BASEMAP_OPTIONS)).addTo(map);
+if (STOPS.some(s => s.year)) map.attributionControl.addAttribution(HISTORY_CREDIT);
+
+// --- Build the text boxes from the STOPS list ---
+const story = document.getElementById("story");
+story.insertAdjacentHTML("beforeend", '<div class="spacer"></div>');
+STOPS.forEach((stop, i) => {
+  const step = document.createElement("section");
+  step.className = "step";
+  step.dataset.index = i;
+  step.innerHTML = `
+    <div class="card">
+      <h2>${stop.title}</h2>
+      ${stop.dates ? `<p class="dates">${stop.dates}</p>` : ""}
+      ${stop.text}
+      ${stop.note ? `<p class="note">${stop.note}</p>` : ""}
+    </div>`;
+  story.appendChild(step);
+});
+story.insertAdjacentHTML("beforeend", '<div class="spacer"></div>');
+
+// --- Historical borders: load each year's file once, then reuse it ---
+const yearCache = {};
+function loadYear(year) {
+  if (!yearCache[year]) {
+    yearCache[year] = fetch(HISTORY_URL.replace("{year}", year))
+      .then(r => { if (!r.ok) throw new Error("No file for " + year); return r.json(); })
+      .catch(err => { console.warn(err); return null; });
+  }
+  return yearCache[year];
+}
+
+let overlay = null;      // the borders currently drawn
+let labelLayer = null;   // the pinned label currently drawn
+let activeIndex = -1;
+
+function drawOverlay(stop, index) {
+  if (overlay) { map.removeLayer(overlay); overlay = null; }
+  if (labelLayer) { map.removeLayer(labelLayer); labelLayer = null; }
+
+  if (stop.label) {
+    labelLayer = L.tooltip({ permanent: true, direction: "center", className: "map-label" })
+      .setLatLng([stop.label.lat, stop.label.lng])
+      .setContent(stop.label.text)
+      .addTo(map);
+  }
+  if (!stop.year) return;
+
+  const names = stop.highlight || [];
+  const rulers = stop.ruler || [];
+  loadYear(stop.year).then(data => {
+    if (!data || index !== activeIndex) return; // visitor already scrolled on
+    overlay = L.geoJSON(data, {
+      style: f => {
+        const p = f.properties || {};
+        const on = names.includes(p.NAME) || rulers.includes(p.SUBJECTO);
+        return on
+          ? { color: cssVar("--accent"), weight: 2, fillColor: cssVar("--accent"), fillOpacity: 0.35 }
+          : { color: cssVar("--context-line"), weight: 0.6, fillOpacity: 0 };
+      }
+    }).addTo(map);
+  });
+}
+
+// Move the map so the target sits in the open area beside (or above) the text box.
+function goTo(stop) {
+  const target = L.latLng(stop.lat, stop.lng);
+  const z = stop.zoom;
+  const card = document.querySelector(`.step[data-index="${STOPS.indexOf(stop)}"] .card`);
+  let shift = L.point(0, 0);
+  if (card) {
+    const r = card.getBoundingClientRect();
+    shift = isPhone() ? L.point(0, r.height / 2) : L.point(-(r.right) / 2, 0);
+  }
+  const center = map.unproject(map.project(target, z).add(shift), z);
+  if (reduceMotion) map.setView(center, z, { animate: false });
+  else map.flyTo(center, z, { duration: 1.6 });
+}
+
+function activate(index) {
+  if (index === activeIndex) return;
+  activeIndex = index;
+  document.querySelectorAll(".step").forEach(el =>
+    el.classList.toggle("is-active", Number(el.dataset.index) === index));
+  goTo(STOPS[index]);
+  drawOverlay(STOPS[index], index);
+}
+
+// Start on the first stop, then switch whenever a box crosses the middle of the screen.
+map.setView([STOPS[0].lat, STOPS[0].lng], STOPS[0].zoom);
+activate(0);
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) activate(Number(e.target.dataset.index)); });
+}, { rootMargin: "-45% 0px -45% 0px" });
+document.querySelectorAll(".step").forEach(el => observer.observe(el));
+
+/* ---------------------------------------------------------------------
+   NOTES ON HISTORICAL OUTLINES
+   - Names must match the dataset exactly (capitals and spaces too).
+     To see the names for a year, open this link in a browser and use
+     Find (Ctrl/Cmd+F), replacing 1914 with your year:
+     https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_1914.geojson
+     Look for "NAME":"..." (the territory) and "SUBJECTO":"..." (who ruled it).
+   - The dataset is a volunteer project. Its own documentation says to
+     check it against other sources before academic use. Many borders
+     are marked low-precision. Say so in your notes.
+   - If a name doesn't match, nothing is coloured — the page won't break.
+   --------------------------------------------------------------------- */
+</script>
+</body>
+</html>
