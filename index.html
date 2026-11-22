@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Empire and After: A Scrolling Atlas of Colonialism</title>
-<meta name="description" content="A scroll-driven map of colonialism from antiquity to the present, with emphasis on the British and French empires, decolonisation and colonial legacies in development.">
+<title>Empire and After: A History of Colonialism</title>
+<meta name="description" content="A history of colonialism from antiquity to the present, with emphasis on the British and French empires, decolonisation and colonial legacies in development.">
 
 <!-- Leaflet (free, open source, no API key). A second CDN is tried automatically if the first fails. -->
 <link id="leaflet-css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
@@ -445,7 +445,7 @@ const CHAPTERS = [
 const STOPS = [
 /* ---------------- INTRO ---------------- */
 {ch:"intro", intro:true, b:V.world, year:1922, show:["GB","FR"], html:`
-<p class="kicker">PO5004 · Peace and Development · University of Limerick</p>
+<p class="kicker">PO5004 · Development · University of Limerick</p>
 <h1>Empire and After</h1>
 <p><em>A scrolling atlas of colonialism, from antiquity to the present, with a focus on the British and French empires, their end, and what they left behind.</em></p>
 <p>The map behind this text changes as you scroll. The opening chapters are a brief overview. Most of the detail goes to Britain and France after 1750, to decolonisation, and to the ways colonial arrangements still shape development policy and practice.</p>
@@ -797,7 +797,7 @@ const METHOD = `
 <p><b>Sources for the map.</b> Modern boundaries are from Natural Earth (1:50m), via the <i>world-atlas</i> package. The borders for 100 CE are from Ourednik's <i>historical-basemaps</i>, which its author describes as a work in progress unsuitable for precise use; they are used here only for a broad overview. North American colonial outlines are schematic and were drawn for this page. Territory dates were compiled from the works in the reference list, chiefly Darwin (2009), Hyam (2006), Thomas (2014), Cooper (2002) and Burbank and Cooper (2010).</p>
 <p><b>What is left out.</b> The United States, Russia, Japan and the Ottoman Empire also ruled colonies or conquered peoples in this period but are not mapped. Indigenous polities, which governed most of the territory Europeans 'claimed' until the late nineteenth century, cannot be shown with modern borders at all, and their absence from the colours should not be read as absence from history.</p>
 <p><b>Currency of information.</b> Statements about the present (Chagos, New Caledonia, the CFA franc, French bases, restitution law and the Haiti commission) were checked on 19 November 2026.</p>
-<p><b>Embedding in Google Sites.</b> Insert → Embed → Embed code, paste the whole of this file, then drag the embed box to full width and at least 700 px high. The map and data load from free public CDNs (jsDelivr, with unpkg and GitHub as fallbacks). No API key or account is needed.</p>`;
+
 
 /* =====================================================================
    BUILD THE PAGE TEXT (works even if the map fails to load)
